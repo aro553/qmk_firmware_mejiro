@@ -10,7 +10,7 @@ typedef struct {
 } abbreviation_result_t;
 
 // ユーザー略語の検索（完全なストロークで検索）
-abbreviation_result_t mejiro_user_abbreviation(const char *stroke);
+abbreviation_result_t mejiro_user_abbreviation(const char *stroke, bool has_asterisk);
 
 // 一般略語の検索（完全なストロークで検索）
-abbreviation_result_t mejiro_abstract_abbreviation(const char *stroke);
+abbreviation_result_t mejiro_abstract_abbreviation(const char *stroke, bool has_asterisk);

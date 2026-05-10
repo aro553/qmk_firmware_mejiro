@@ -9,6 +9,7 @@
 
 // 前回の母音を保存（省略時に使用）
 static char last_vowel_stroke[8] = "A";  // デフォルトは"A"
+static char prev_joshi[32] = "";
 
 // 「っ」の持ち越し状態
 static bool pending_tsu = false;
@@ -307,7 +308,7 @@ static const exception_kana_t exception_kana_table[] = {
 //  |U  |YA |YI |YU  |YIU|YAU|YIAU|IAU|IU  |Y   |YIA
 // -|---|---|---|----|---|---|----|---|----|----|----
 // F|vu |va |vi |fyu |ve |vo |jei |je |vyu |----|----
-// W|xwa|wha|wyi|yui |wye|wo |chei|che|iu  |----|----
+// W|xwa|wha|wyi|ui  |wye|wo |chei|che|yui |----|----
 // D|---|thi|twu|dhu |dwu|dhi|ye  |---|thu |----|----
 // X|---|sta|sti|sthi|ste|sto|shei|she|kusu|stai|stei
 
@@ -326,12 +327,12 @@ static const exception_kana_t exception_kana_table[] = {
     {"SKU", "ゎ"},
     {"SKYA", "うぁ"},
     {"SKYI", "ゐ"},
-    {"SKYU", "ゆい"},
+    {"SKYU", "いう"},
     {"SKYIU", "ゑ"},
     {"SKYAU", "を"},
     {"SKYIAU", "ちぇい"},
     {"SKIAU", "ちぇ"},
-    {"SKIU", "いう"},
+    {"SKIU", "ゆい"},
 
     // D
     {"TNYA", "てぃ"},
@@ -363,7 +364,31 @@ static const char *particle_key_list[] = {"", "n", "t", "k", "tk", "nt", "nk", "
 // 左側助詞
 static const char *l_particle[] = {"", "、", "に", "の", "で", "と", "を", "へ"};
 // 右側助詞
-static const char *r_particle[] = {"", "、", "は", "が", "も", "は、", "が、", "も、"};
+static const char *r_particle[] = {"", "、", "は", "が", "も", "は、", "が、", "や"};
+
+static void replace_he_with_ka(char *text) {
+    char *p = text;
+    while ((p = strstr(p, "へ")) != NULL) {
+        memcpy(p, "か", strlen("か"));
+        p += strlen("か");
+    }
+}
+
+static void replace_nana_with_nanoga(char *text, size_t text_size) {
+    char *p = text;
+    const size_t from_len = strlen("なな");
+    const size_t to_len = strlen("なのが");
+    while ((p = strstr(p, "なな")) != NULL) {
+        size_t tail_len = strlen(p + from_len);
+        size_t used_len = strlen(text);
+        if (used_len + (to_len - from_len) >= text_size) {
+            break;
+        }
+        memmove(p + to_len, p + from_len, tail_len + 1);
+        memcpy(p, "なのが", to_len);
+        p += to_len;
+    }
+}
 
 // メジロIDをパース（左側・右側に分離）
 static void parse_mejiro_id(const char *id, char *left, char *right) {
@@ -791,50 +816,68 @@ static void convert_to_syllable(const char *conso, const char *vowel, const char
 
 // 助詞変換
 static void transform_joshi(const char *left_stroke, const char *right_stroke, char *out) {
-    // right_strokeからnを除去
+    // right_strokeの先頭側nを取り除いた助詞キー（Python版 split("n", 1)[-1] と同等）
     char right_tk[16] = {0};
-    bool has_comma = false;
-
-    if (strstr(right_stroke, "n") != NULL) {
-        has_comma = true;
-        // nを除去
-        const char *p = right_stroke;
-        char *q = right_tk;
-        while (*p) {
-            if (*p != 'n') *q++ = *p;
-            p++;
-        }
-        *q = '\0';
+    const char *n_pos = strchr(right_stroke, 'n');
+    if (n_pos != NULL) {
+        strncpy(right_tk, n_pos + 1, sizeof(right_tk) - 1);
     } else {
-        strcpy(right_tk, right_stroke);
+        strncpy(right_tk, right_stroke, sizeof(right_tk) - 1);
     }
+    bool has_comma = (strstr(right_stroke, "n") != NULL);
 
     // インデックス取得
-    int l_idx = -1, r_idx = -1;
+    int l_idx = -1, r_idx = -1, r_raw_idx = -1;
     for (uint8_t i = 0; i < sizeof(particle_key_list)/sizeof(particle_key_list[0]); i++) {
         if (strcmp(left_stroke, particle_key_list[i]) == 0) l_idx = i;
         if (strcmp(right_tk, particle_key_list[i]) == 0) r_idx = i;
+        if (strcmp(right_stroke, particle_key_list[i]) == 0) r_raw_idx = i;
     }
 
-    if (l_idx < 0 || r_idx < 0) {
+    if (l_idx < 0 || r_idx < 0 || r_raw_idx < 0) {
         out[0] = '\0';
         return;
     }
 
+    const char *left_joshi = l_particle[l_idx];
+    const char *right_joshi = r_particle[r_idx];
+    const char *right_raw_joshi = r_particle[r_raw_idx];
+
     // 助詞組み立て
-    if (strcmp(left_stroke, "n") == 0) {
-        strcpy(out, r_particle[r_idx]);
+    if ((strcmp(left_stroke, "n") == 0 || strcmp(left_stroke, "") == 0) &&
+        strcmp(right_stroke, "ntk") == 0) {
+        strcpy(out, right_raw_joshi);
+        if (strcmp(left_stroke, "n") == 0) {
+            strcat(out, "、");
+        }
+    } else if (strcmp(left_stroke, "n") == 0 && right_stroke[0] != '\0') {
+        strcpy(out, right_joshi);
         strcat(out, "、");
-    } else if ((strcmp(right_stroke, "k") == 0 || strcmp(right_stroke, "nk") == 0) && strcmp(left_stroke, "") != 0) {
-        strcpy(out, "の");
-        strcat(out, l_particle[l_idx]);
-        if (strcmp(out, "のの") == 0) strcpy(out, "な");
+    } else if (left_stroke[0] != '\0' &&
+               (strcmp(right_stroke, "k") == 0 || strcmp(right_stroke, "nk") == 0)) {
+        if (strcmp(left_stroke, "nt") == 0 || strcmp(left_stroke, "ntk") == 0) {
+            strcpy(out, left_joshi);
+            strcat(out, "の");
+        } else {
+            strcpy(out, "の");
+            strcat(out, left_joshi);
+        }
+        if (strcmp(out, "のの") == 0) {
+            if (strcmp(prev_joshi, "な") == 0) {
+                strcpy(out, "のが");
+            } else {
+                strcpy(out, "な");
+            }
+        }
         if (has_comma) strcat(out, "、");
     } else {
-        strcpy(out, l_particle[l_idx]);
-        strcat(out, r_particle[r_idx]);
+        strcpy(out, left_joshi);
+        strcat(out, right_joshi);
         if (has_comma) strcat(out, "、");
     }
+
+    strncpy(prev_joshi, out, sizeof(prev_joshi) - 1);
+    prev_joshi[sizeof(prev_joshi) - 1] = '\0';
 }
 
 mejiro_result_t mejiro_transform(const char *mejiro_id) {
@@ -909,108 +952,103 @@ mejiro_result_t mejiro_transform(const char *mejiro_id) {
         p++;
     }
 
-    // 動詞活用チェック（通常の変換より先に）。アスタリスクがある場合のみ動詞略語を試行。
-    if (has_asterisk) {
-        // 完全なストロークを構築（アスタリスクを除く）
-        char full_stroke[128];
-        snprintf(full_stroke, sizeof(full_stroke), "%s%s%s-%s%s%s",
-                 l_conso, l_vowel, l_particle_str,
-                 r_conso, r_vowel, r_particle_str);
+    // 完全なストロークを構築（アスタリスクを除く）
+    char full_stroke[128];
+    snprintf(full_stroke, sizeof(full_stroke), "%s%s%s-%s%s%s",
+             l_conso, l_vowel, l_particle_str,
+             r_conso, r_vowel, r_particle_str);
 
-        // 一般略語用のストローク（助詞なし）
-        char abbr_stroke[128];
-        snprintf(abbr_stroke, sizeof(abbr_stroke), "%s%s-%s%s",
-                 l_conso, l_vowel, r_conso, r_vowel);
+    // 一般略語用のストローク（助詞なし）
+    char abbr_stroke[128];
+    snprintf(abbr_stroke, sizeof(abbr_stroke), "%s%s-%s%s",
+             l_conso, l_vowel, r_conso, r_vowel);
 
-        // ユーザー略語チェック（最優先、助詞込み）
-        abbreviation_result_t user_abbr = mejiro_user_abbreviation(full_stroke);
-        if (user_abbr.success) {
-            result.kana_length = utf8_char_count(user_abbr.output);
-            kana_to_roma(user_abbr.output, result.output, sizeof(result.output));
-            result.success = true;
-            return result;
-        }
+    // ユーザー略語チェック（最優先）
+    abbreviation_result_t user_abbr = mejiro_user_abbreviation(full_stroke, has_asterisk);
+    if (user_abbr.success) {
+        result.kana_length = utf8_char_count(user_abbr.output);
+        kana_to_roma(user_abbr.output, result.output, sizeof(result.output));
+        result.success = true;
+        return result;
+    }
 
-        // 一般略語チェック（助詞なし）
-        abbreviation_result_t abstract_abbr = mejiro_abstract_abbreviation(abbr_stroke);
-        if (abstract_abbr.success) {
-            // 一般略語の出力に助詞を追加
-            char kana_output[256] = {0};
-            strcpy(kana_output, abstract_abbr.output);
-            result.kana_length = utf8_char_count(kana_output);
+    // 一般略語チェック
+    abbreviation_result_t abstract_abbr = mejiro_abstract_abbreviation(abbr_stroke, has_asterisk);
+    if (abstract_abbr.success) {
+        // 一般略語の出力に助詞を追加
+        char kana_output[256] = {0};
+        strcpy(kana_output, abstract_abbr.output);
+        result.kana_length = utf8_char_count(kana_output);
 
-            // 助詞がある場合は追加
-            if (strlen(l_particle_str) > 0 || strlen(r_particle_str) > 0) {
-                // 助詞パターンを構築
-                char particle_pattern[32];
-                snprintf(particle_pattern, sizeof(particle_pattern), "%s-%s", l_particle_str, r_particle_str);
+        // 助詞がある場合は追加
+        if (strlen(l_particle_str) > 0 || strlen(r_particle_str) > 0) {
+            // 助詞パターンを構築
+            char particle_pattern[32];
+            snprintf(particle_pattern, sizeof(particle_pattern), "%s-%s", l_particle_str, r_particle_str);
 
-                // 特定の助詞パターンに対して語尾に変換
-                if (strcmp(particle_pattern, "n-") == 0) {
-                    strcat(kana_output, "である");
-                } else if (strcmp(particle_pattern, "-n") == 0) {
-                    strcat(kana_output, "だ");
-                } else if (strcmp(particle_pattern, "n-n") == 0) {
-                    strcat(kana_output, "だった");
-                } else if (strcmp(particle_pattern, "-ntk") == 0) {
-                    strcat(kana_output, "です");
-                } else if (strcmp(particle_pattern, "n-ntk") == 0) {
-                    strcat(kana_output, "でした");
-                } else if (strcmp(particle_pattern, "-nt") == 0) {
-                    strcat(kana_output, "。");
-                } else if (strcmp(particle_pattern, "-nk") == 0) {
-                    strcat(kana_output, "、");
-                } else if (strcmp(particle_pattern, "n-nt") == 0) {
-                    strcat(kana_output, "?");
-                } else if (strcmp(particle_pattern, "n-nk") == 0) {
-                    strcat(kana_output, "!");
-                } else {
-                    // その他の助詞は通常通り処理
-                    char joshi_output[128] = {0};
-                    transform_joshi(l_particle_str, r_particle_str, joshi_output);
-                    strcat(kana_output, joshi_output);
-                }
-                result.kana_length = utf8_char_count(kana_output);
+            // 特定の助詞パターンに対して語尾に変換
+            if (strcmp(particle_pattern, "n-") == 0) {
+                strcat(kana_output, "である");
+            } else if (strcmp(particle_pattern, "-n") == 0) {
+                strcat(kana_output, "だ");
+            } else if (strcmp(particle_pattern, "n-n") == 0) {
+                strcat(kana_output, "だった");
+            } else if (strcmp(particle_pattern, "-nt") == 0) {
+                strcat(kana_output, "。");
+            } else if (strcmp(particle_pattern, "-nk") == 0) {
+                strcat(kana_output, "、");
+            } else if (strcmp(particle_pattern, "n-nt") == 0) {
+                strcat(kana_output, "?");
+            } else if (strcmp(particle_pattern, "n-nk") == 0) {
+                strcat(kana_output, "!");
+            } else {
+                // その他の助詞は通常通り処理
+                char joshi_output[128] = {0};
+                transform_joshi(l_particle_str, r_particle_str, joshi_output);
+                replace_he_with_ka(joshi_output);
+                strcat(kana_output, joshi_output);
             }
-
-            kana_to_roma(kana_output, result.output, sizeof(result.output));
-            result.success = true;
-            return result;
-        }
-
-        // 動詞略語チェック
-        char left_kana_temp[64] = {0};
-        char right_kana_temp[64] = {0};
-        char left_syllable_temp[64] = {0};
-        char right_syllable_temp[64] = {0};
-
-        // 左側の仮名を生成（動詞語幹用）
-        if (strlen(l_conso) > 0 || strlen(l_vowel) > 0) {
-            convert_to_kana(l_conso, l_vowel, "", false, left_kana_temp);
-            convert_to_syllable(l_conso, l_vowel, l_particle_str, left_syllable_temp);
-        }
-        // 右側の仮名を生成（動詞語幹用）
-        if (strlen(r_conso) > 0 || strlen(r_vowel) > 0) {
-            convert_to_kana(r_conso, r_vowel, "", false, right_kana_temp);
-            convert_to_syllable(r_conso, r_vowel, r_particle_str, right_syllable_temp);
-        }
-
-        verb_result_t verb_result = mejiro_verb_conjugate(
-            l_conso, l_vowel, l_particle_str,
-            r_conso, r_vowel, r_particle_str,
-            left_kana_temp, right_kana_temp,
-            left_syllable_temp, right_syllable_temp
-        );
-
-        if (verb_result.success) {
-            // 動詞活用結果をローマ字に変換して返す
-            char kana_output[128];
-            strcpy(kana_output, verb_result.output);
             result.kana_length = utf8_char_count(kana_output);
-            kana_to_roma(kana_output, result.output, sizeof(result.output));
-            result.success = true;
-            return result;
         }
+
+        kana_to_roma(kana_output, result.output, sizeof(result.output));
+        result.success = true;
+        return result;
+    }
+
+    // 動詞略語チェック
+    char left_kana_temp[64] = {0};
+    char right_kana_temp[64] = {0};
+    char left_syllable_temp[64] = {0};
+    char right_syllable_temp[64] = {0};
+
+    // 左側の仮名を生成（動詞語幹用）
+    if (strlen(l_conso) > 0 || strlen(l_vowel) > 0) {
+        convert_to_kana(l_conso, l_vowel, "", false, left_kana_temp);
+        convert_to_syllable(l_conso, l_vowel, l_particle_str, left_syllable_temp);
+    }
+    // 右側の仮名を生成（動詞語幹用）
+    if (strlen(r_conso) > 0 || strlen(r_vowel) > 0) {
+        convert_to_kana(r_conso, r_vowel, "", false, right_kana_temp);
+        convert_to_syllable(r_conso, r_vowel, r_particle_str, right_syllable_temp);
+    }
+
+    verb_result_t verb_result = mejiro_verb_conjugate(
+        l_conso, l_vowel, l_particle_str,
+        r_conso, r_vowel, r_particle_str,
+        left_kana_temp, right_kana_temp,
+        left_syllable_temp, right_syllable_temp,
+        has_asterisk
+    );
+
+    if (verb_result.success) {
+        // 動詞活用結果をローマ字に変換して返す
+        char kana_output[128];
+        strcpy(kana_output, verb_result.output);
+        result.kana_length = utf8_char_count(kana_output);
+        kana_to_roma(kana_output, result.output, sizeof(result.output));
+        result.success = true;
+        return result;
     }
 
     // 助詞のみの場合は助詞変換
@@ -1140,8 +1178,10 @@ mejiro_result_t mejiro_transform(const char *mejiro_id) {
             if (!found_in_commands) {
                 char joshi_output[64] = {0};
                 transform_joshi(l_particle_str, r_particle_str, joshi_output);
+                replace_he_with_ka(joshi_output);
                 strcat(result.output, joshi_output);
             }
+            replace_nana_with_nanoga(result.output, sizeof(result.output));
         }
         // 左のかながなくても、左の追加音キーがあってかつ右のかながある場合
         // 左の追加音を先に出力

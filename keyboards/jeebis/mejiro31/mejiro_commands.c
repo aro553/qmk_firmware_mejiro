@@ -9,7 +9,7 @@ const mejiro_command_t mejiro_commands[] = {
     {"-U",    CMD_UNDO,   {.keycode = 0}},
 
     // コマンド
-    {"#-n",    CMD_KEYCODE, {.keycode = LSFT(KC_ENTER)}},
+    {"#n-n",    CMD_KEYCODE, {.keycode = LSFT(KC_ENTER)}},
     {"#-nk",   CMD_KEYCODE, {.keycode = LCTL(KC_ENTER)}},
     {"#-t",    CMD_KEYCODE, {.keycode = KC_LNG1}},
     {"#-k",    CMD_KEYCODE, {.keycode = KC_LNG2}},
@@ -36,8 +36,6 @@ const mejiro_command_t mejiro_commands[] = {
     {"-n",    CMD_KEYCODE, {.keycode = KC_ENTER}},
     {"n-",    CMD_KEYCODE, {.keycode = KC_SPACE}},
     {"n-n",   CMD_KEYCODE, {.keycode = KC_TAB}},
-    {"-ntk",  CMD_KEYCODE, {.keycode = KC_F7}},
-    {"n-ntk", CMD_KEYCODE, {.keycode = KC_F8}},
 
     // 文字列送信
     {"-YA",   CMD_STRING,  {.string = "\""}},
@@ -45,9 +43,8 @@ const mejiro_command_t mejiro_commands[] = {
     {"-TK",   CMD_STRING,  {.string = "|"}},
     {"-IA",   CMD_STRING,  {.string = ":"}},
     {"-NY",   CMD_STRING,  {.string = "z/"}}, // ・
-    {"-TN",   CMD_STRING,  {.string = "*"}},
     {"-KY",   CMD_STRING,  {.string = "z*"}}, // ※
-    {"-TI",   CMD_STRING,  {.string = "~"}},
+    {"-SKA",   CMD_STRING,  {.string = "~"}},
     {"-YI",   CMD_STRING,  {.string = "("}},
     {"-TY",   CMD_STRING,  {.string = ")"}},
     {"-SYI",   CMD_STRING,  {.string = "z("}}, //【

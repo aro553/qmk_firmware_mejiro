@@ -19,6 +19,14 @@ static char     history_outputs[HISTORY_SIZE][64];
 static uint8_t  history_lengths[HISTORY_SIZE];
 static uint8_t  history_count = 0;
 
+#define MACRO_VALUE_SIZE 512
+#define MACRO_KEY_COUNT 7
+static const char *macro_keys[MACRO_KEY_COUNT] = {"n", "t", "k", "nt", "nk", "tk", "ntk"};
+static char macro_values[MACRO_KEY_COUNT][MACRO_VALUE_SIZE];
+static bool active_recording_macros[MACRO_KEY_COUNT];
+static uint8_t recording_macro_order[MACRO_KEY_COUNT];
+static uint8_t recording_macro_order_len = 0;
+
 static bool contains(uint16_t kc) {
     for (uint8_t i = 0; i < chord_len; i++) {
         if (chord[i] == kc) return true;
@@ -110,6 +118,79 @@ static void send_string_jis_aware(const char *s) {
 static bool ends_with_space(const char *s) {
     size_t len = strlen(s);
     return (len > 0 && s[len - 1] == ' ');
+}
+
+static int macro_key_to_index(const char *key) {
+    for (uint8_t i = 0; i < MACRO_KEY_COUNT; i++) {
+        if (strcmp(key, macro_keys[i]) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void push_macro_order(uint8_t idx) {
+    for (uint8_t i = 0; i < recording_macro_order_len; i++) {
+        if (recording_macro_order[i] == idx) {
+            for (uint8_t j = i; j + 1 < recording_macro_order_len; j++) {
+                recording_macro_order[j] = recording_macro_order[j + 1];
+            }
+            recording_macro_order_len--;
+            break;
+        }
+    }
+    if (recording_macro_order_len < MACRO_KEY_COUNT) {
+        recording_macro_order[recording_macro_order_len++] = idx;
+    }
+}
+
+static void remove_macro_order(uint8_t idx) {
+    for (uint8_t i = 0; i < recording_macro_order_len; i++) {
+        if (recording_macro_order[i] == idx) {
+            for (uint8_t j = i; j + 1 < recording_macro_order_len; j++) {
+                recording_macro_order[j] = recording_macro_order[j + 1];
+            }
+            recording_macro_order_len--;
+            break;
+        }
+    }
+}
+
+static void append_to_active_macros(const char *s) {
+    if (s == NULL || s[0] == '\0') {
+        return;
+    }
+    for (uint8_t i = 0; i < MACRO_KEY_COUNT; i++) {
+        if (!active_recording_macros[i]) {
+            continue;
+        }
+        size_t current_len = strlen(macro_values[i]);
+        if (current_len >= MACRO_VALUE_SIZE - 1) {
+            continue;
+        }
+        size_t remain = MACRO_VALUE_SIZE - current_len - 1;
+        strncat(macro_values[i], s, remain);
+    }
+}
+
+static void push_history(const char *output, uint8_t length) {
+    if (output == NULL || output[0] == '\0') {
+        return;
+    }
+    if (history_count < HISTORY_SIZE) {
+        strncpy(history_outputs[history_count], output, sizeof(history_outputs[0]) - 1);
+        history_outputs[history_count][sizeof(history_outputs[0]) - 1] = '\0';
+        history_lengths[history_count] = length;
+        history_count++;
+        return;
+    }
+    for (uint8_t i = 0; i < HISTORY_SIZE - 1; i++) {
+        strcpy(history_outputs[i], history_outputs[i + 1]);
+        history_lengths[i] = history_lengths[i + 1];
+    }
+    strncpy(history_outputs[HISTORY_SIZE - 1], output, sizeof(history_outputs[0]) - 1);
+    history_outputs[HISTORY_SIZE - 1][sizeof(history_outputs[0]) - 1] = '\0';
+    history_lengths[HISTORY_SIZE - 1] = length;
 }
 
 // メジロIDのビット順: S,T,K,N,Y,I,A,U,n,t,k,# | S,T,K,N,Y,I,A,U,n,t,k,*
@@ -208,6 +289,7 @@ static void convert_and_send(void) {
     // # を含むパターンの処理：# を除いたパターンを処理して出力を繰り返す
     // ただし、# で始まるコマンドテーブル登録パターン（#-S など）は繰り返し対象外
     bool has_hash = strchr(out, '#') != NULL;
+    bool has_asterisk = strchr(out, '*') != NULL;
     char pattern_without_hash[64] = {0};
 
     if (has_hash) {
@@ -221,6 +303,59 @@ static void convert_and_send(void) {
         pattern_without_hash[j] = '\0';
     }
 
+    // マクロ処理（Plover互換）
+    bool left_has_conso_or_vowel = (bits & 0xFF) != 0;
+    bool left_has_particle = (bits & ((1UL << 8) | (1UL << 9) | (1UL << 10))) != 0;
+    bool right_has_conso_or_vowel = (bits & (0xFFUL << 12)) != 0;
+    bool right_has_particle = (bits & ((1UL << 20) | (1UL << 21) | (1UL << 22))) != 0;
+    bool pure_left_particle = (!left_has_conso_or_vowel && left_has_particle && !right_has_conso_or_vowel && !right_has_particle);
+
+    char left_particle_key[8] = {0};
+    uint8_t lp = 0;
+    if (bits & (1UL << 8)) left_particle_key[lp++] = 'n';
+    if (bits & (1UL << 9)) left_particle_key[lp++] = 't';
+    if (bits & (1UL << 10)) left_particle_key[lp++] = 'k';
+    left_particle_key[lp] = '\0';
+
+    int macro_idx = macro_key_to_index(left_particle_key);
+    bool is_macro_target = pure_left_particle && (macro_idx >= 0);
+    bool is_macro_record_toggle = has_hash && has_asterisk && is_macro_target;
+    bool is_macro_record_stop_generic = has_hash && has_asterisk &&
+                                        !left_has_conso_or_vowel && !left_has_particle &&
+                                        !right_has_conso_or_vowel && !right_has_particle;
+    bool is_macro_replay = has_hash && !has_asterisk && is_macro_target;
+
+    if (is_macro_record_toggle) {
+        if (active_recording_macros[macro_idx]) {
+            active_recording_macros[macro_idx] = false;
+            remove_macro_order((uint8_t)macro_idx);
+        } else {
+            macro_values[macro_idx][0] = '\0';
+            active_recording_macros[macro_idx] = true;
+            push_macro_order((uint8_t)macro_idx);
+        }
+        return;
+    }
+
+    if (is_macro_record_stop_generic) {
+        if (recording_macro_order_len > 0) {
+            uint8_t idx = recording_macro_order[recording_macro_order_len - 1];
+            recording_macro_order_len--;
+            active_recording_macros[idx] = false;
+        }
+        return;
+    }
+
+    if (is_macro_replay) {
+        const char *macro_output = macro_values[macro_idx];
+        if (macro_output[0] != '\0') {
+            send_string(macro_output);
+            append_to_active_macros(macro_output);
+            push_history(macro_output, (uint8_t)strlen(macro_output));
+        }
+        return;
+    }
+
     // 変換テーブル検索：まず元のパターンで検索（#- などの特殊コマンドを優先）
     for (uint8_t i = 0; i < mejiro_command_count; i++) {
         if (strcmp(out, mejiro_commands[i].pattern) == 0) {
@@ -229,6 +364,7 @@ static void convert_and_send(void) {
                     if (history_count > 0) {
                         uint8_t idx = history_count - 1;
                         send_string(history_outputs[idx]);
+                        append_to_active_macros(history_outputs[idx]);
                         last_output_was_space = ends_with_space(history_outputs[idx]);
                         // 繰り返した出力を新しい履歴として追加
                         if (history_count < HISTORY_SIZE) {
@@ -326,9 +462,11 @@ static void convert_and_send(void) {
 
                         output_str = expanded;
                         send_string_jis_aware(expanded);
+                        append_to_active_macros(expanded);
                         tap_code(KC_LEFT);
                     } else {
                         send_string_jis_aware(str);
+                        append_to_active_macros(str);
                     }
 
                     last_output_was_space = ends_with_space(output_str);
@@ -367,8 +505,10 @@ static void convert_and_send(void) {
                         if (history_count > 0) {
                             uint8_t idx = history_count - 1;
                             send_string(history_outputs[idx]);
+                            append_to_active_macros(history_outputs[idx]);
                             // # を含む場合は同じ出力をもう一度送信
                             send_string(history_outputs[idx]);
+                            append_to_active_macros(history_outputs[idx]);
                             last_output_was_space = ends_with_space(history_outputs[idx]);
 
                             // 繰り返した出力（2倍の長さ）を新しい履歴として追加
@@ -444,13 +584,16 @@ static void convert_and_send(void) {
 
                             output_str = expanded;
                             send_string_jis_aware(expanded);
+                            append_to_active_macros(expanded);
                             tap_code(KC_LEFT);
                         } else {
                             send_string_jis_aware(str);
+                            append_to_active_macros(str);
                         }
 
                         // # を含む場合は同じ出力をもう一度送信
                         send_string_jis_aware(output_str);
+                        append_to_active_macros(output_str);
                         if (has_left_placeholder) {
                             tap_code(KC_LEFT);
                         }
@@ -479,15 +622,24 @@ static void convert_and_send(void) {
     }
 
     // 右側だけの入力で、コマンドテーブルに登録されていない場合はSTN_コード出力
-    // ただし、* を含む場合や、右手だけの助詞キー（k,t,n,tk,nt,nk,ntk）はメジロ変換を試みる
+    // ただし、* を含む場合や、右手だけの助詞キー（k,t,n,tk,nt,nk,ntk）、
+    // 一般略語の右手のみ入力（-KAU/-TI/-STA/-STIA）、
+    // 動詞推論の右手のみ入力（語尾 I / IA）はメジロ変換を試みる
     if (!left_has && right_has && strchr(out, '*') == NULL) {
         const char *right_only = out[0] == '-' ? out + 1 : out;  // 先頭のハイフンを除去
         bool is_particle =
             (strcmp(right_only, "k") == 0) || (strcmp(right_only, "t") == 0) || (strcmp(right_only, "n") == 0) ||
             (strcmp(right_only, "tk") == 0) || (strcmp(right_only, "nt") == 0) || (strcmp(right_only, "nk") == 0) ||
             (strcmp(right_only, "ntk") == 0);
+        bool is_right_only_abstract =
+            (strcmp(right_only, "KAU") == 0) || (strcmp(right_only, "TI") == 0) ||
+            (strcmp(right_only, "STA") == 0) || (strcmp(right_only, "STIA") == 0);
+        size_t right_len = strlen(right_only);
+        bool is_right_only_verb_inference =
+            (right_len >= 1 && strcmp(right_only + right_len - 1, "I") == 0) ||
+            (right_len >= 2 && strcmp(right_only + right_len - 2, "IA") == 0);
 
-        if (!is_particle) {
+        if (!is_particle && !is_right_only_abstract && !is_right_only_verb_inference) {
             should_send_passthrough = true;
             return;
         }
@@ -502,29 +654,17 @@ static void convert_and_send(void) {
         const char *final_output = transformed.output;
         uint8_t final_length = (uint8_t)transformed.kana_length;
         send_string(final_output);
+        append_to_active_macros(final_output);
 
         // # を含む場合は同じ出力をもう一度送信
         if (has_hash) {
             send_string(final_output);
+            append_to_active_macros(final_output);
             // 履歴の長さも2倍にする
             final_length *= 2;
         }
 
-        if (history_count < HISTORY_SIZE) {
-            strncpy(history_outputs[history_count], final_output, sizeof(history_outputs[0]) - 1);
-            history_outputs[history_count][sizeof(history_outputs[0]) - 1] = '\0';
-            history_lengths[history_count] = final_length;
-            history_count++;
-        } else {
-            // 履歴が満杯の場合は古いものをシフトして最新を追加
-            for (uint8_t i = 0; i < HISTORY_SIZE - 1; i++) {
-                strcpy(history_outputs[i], history_outputs[i + 1]);
-                history_lengths[i] = history_lengths[i + 1];
-            }
-            strncpy(history_outputs[HISTORY_SIZE - 1], final_output, sizeof(history_outputs[0]) - 1);
-            history_outputs[HISTORY_SIZE - 1][sizeof(history_outputs[0]) - 1] = '\0';
-            history_lengths[HISTORY_SIZE - 1] = final_length;
-        }
+        push_history(final_output, final_length);
     } else {
         // メジロ変換失敗時はパススルーフラグをセット
         should_send_passthrough = true;
@@ -574,4 +714,9 @@ void mejiro_send_passthrough_keys(void) {
 void mejiro_reset_state(void) {
     reset_chord();
     last_output_was_space = false;
+    recording_macro_order_len = 0;
+    for (uint8_t i = 0; i < MACRO_KEY_COUNT; i++) {
+        macro_values[i][0] = '\0';
+        active_recording_macros[i] = false;
+    }
 }
