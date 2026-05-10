@@ -622,29 +622,8 @@ static void convert_and_send(void) {
         }
     }
 
-    // 右側だけの入力で、コマンドテーブルに登録されていない場合はSTN_コード出力
-    // ただし、* を含む場合や、右手だけの助詞キー（k,t,n,tk,nt,nk,ntk）、
-    // 一般略語の右手のみ入力（-KAU/-TI/-STA/-STIA）、
-    // 動詞推論の右手のみ入力（語尾 I / IA）はメジロ変換を試みる
-    if (!left_has && right_has && strchr(out, '*') == NULL) {
-        const char *right_only = out[0] == '-' ? out + 1 : out;  // 先頭のハイフンを除去
-        bool is_particle =
-            (strcmp(right_only, "k") == 0) || (strcmp(right_only, "t") == 0) || (strcmp(right_only, "n") == 0) ||
-            (strcmp(right_only, "tk") == 0) || (strcmp(right_only, "nt") == 0) || (strcmp(right_only, "nk") == 0) ||
-            (strcmp(right_only, "ntk") == 0);
-        bool is_right_only_abstract =
-            (strcmp(right_only, "KAU") == 0) || (strcmp(right_only, "TI") == 0) ||
-            (strcmp(right_only, "STA") == 0) || (strcmp(right_only, "STIA") == 0);
-        size_t right_len = strlen(right_only);
-        bool is_right_only_verb_inference =
-            (right_len >= 1 && strcmp(right_only + right_len - 1, "I") == 0) ||
-            (right_len >= 2 && strcmp(right_only + right_len - 2, "IA") == 0);
-
-        if (!is_particle && !is_right_only_abstract && !is_right_only_verb_inference) {
-            should_send_passthrough = true;
-            return;
-        }
-    }
+    // 右手のみ入力も含め、未コマンド入力は一度すべて mejiro_transform に渡す。
+    // 変換できなかった場合のみ下の失敗分岐でパススルーする。
 
     // mejiro_transform: # を含む場合は # を除いたパターンで変換
     const char *transform_pattern = has_hash && pattern_without_hash[0] != '\0' ? pattern_without_hash : out;
