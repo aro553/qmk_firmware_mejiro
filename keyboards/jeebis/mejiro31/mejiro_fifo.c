@@ -9,13 +9,17 @@
 #define MEJIRO_MAX_KEYS 32
 
 static uint16_t chord[MEJIRO_MAX_KEYS];
+static uint16_t held_stn_keys[MEJIRO_MAX_KEYS];
 static uint8_t  chord_len = 0;
+static uint8_t  held_stn_len = 0;
 static uint8_t  down_count = 0;
 static uint8_t  prev_down_count = 0;
 static bool     chord_active = false;
+static bool     chord_has_new_press = false;
 static bool     should_send_passthrough = false;  // 変換失敗時のパススルーフラグ
 static bool     last_output_was_space = false;    // 直近に出力した文字がスペースかを記録
-bool            mejiro_first_up_chord_send = false;
+
+bool            mejiro_first_up_chord_send = true;
 
 #define HISTORY_SIZE 20
 static char     history_outputs[HISTORY_SIZE][64];
@@ -37,6 +41,42 @@ static bool contains(uint16_t kc) {
     return false;
 }
 
+static bool held_contains(uint16_t kc) {
+    for (uint8_t i = 0; i < held_stn_len; i++) {
+        if (held_stn_keys[i] == kc) return true;
+    }
+    return false;
+}
+
+static void append_held_stn(uint16_t kc) {
+    if (held_stn_len >= MEJIRO_MAX_KEYS) return;
+    if (held_contains(kc)) return;
+    held_stn_keys[held_stn_len++] = kc;
+}
+
+static void remove_held_stn(uint16_t kc) {
+    for (uint8_t i = 0; i < held_stn_len; i++) {
+        if (held_stn_keys[i] == kc) {
+            for (uint8_t j = i; j + 1 < held_stn_len; j++) {
+                held_stn_keys[j] = held_stn_keys[j + 1];
+            }
+            held_stn_len--;
+            return;
+        }
+    }
+}
+
+static void seed_chord_from_held_stn(void) {
+    if (held_stn_len == 0) return;
+    chord_active = true;
+    chord_has_new_press = false;
+    for (uint8_t i = 0; i < held_stn_len; i++) {
+        if (chord_len >= MEJIRO_MAX_KEYS) return;
+        if (contains(held_stn_keys[i])) continue;
+        chord[chord_len++] = held_stn_keys[i];
+    }
+}
+
 bool is_stn_key(uint16_t kc) {
     switch (kc) {
         case STN_N1: case STN_S1: case STN_TL: case STN_PL: case STN_HL: case STN_ST1: case STN_ST3:
@@ -54,6 +94,7 @@ bool is_stn_key(uint16_t kc) {
 static void reset_chord(void) {
     chord_len = 0;
     chord_active = false;
+    chord_has_new_press = false;
     should_send_passthrough = false;
 }
 
@@ -675,25 +716,35 @@ static void convert_and_send(void) {
 }
 
 void mejiro_on_press(uint16_t kc) {
+    append_held_stn(kc);
     down_count++;
     if (down_count > prev_down_count) {
         if (!chord_active) chord_active = true;
         append_kc(kc);
+        chord_has_new_press = true;
     }
     prev_down_count = down_count;
 }
 
 void mejiro_on_release(uint16_t kc) {
-    (void)kc;
+    remove_held_stn(kc);
     if (down_count > 0) down_count--;
 
+    if (mejiro_first_up_chord_send && !chord_has_new_press) {
+        reset_chord();
+        seed_chord_from_held_stn();
+    }
+
     bool should_commit = mejiro_first_up_chord_send
-                           ? (down_count < prev_down_count)
+                           ? (chord_has_new_press && down_count < prev_down_count)
                            : (down_count == 0 && prev_down_count > 0);
 
     if (chord_active && should_commit && chord_len > 0) {
         convert_and_send();
         reset_chord();
+        if (mejiro_first_up_chord_send && down_count > 0) {
+            seed_chord_from_held_stn();
+        }
     }
     prev_down_count = down_count;
 }
@@ -726,6 +777,9 @@ void mejiro_send_passthrough_keys(void) {
 
 void mejiro_reset_state(void) {
     reset_chord();
+    held_stn_len = 0;
+    down_count = 0;
+    prev_down_count = 0;
     last_output_was_space = false;
     recording_macro_order_len = 0;
     for (uint8_t i = 0; i < MACRO_KEY_COUNT; i++) {
