@@ -1,5 +1,6 @@
 #include "mejiro_fifo.h"
 #include "mejiro_commands.h"
+#include "mejiro_abbreviations.h"
 #include "mejiro_transform.h"
 #include "jis_transform.h"
 #include <stdlib.h>
@@ -121,6 +122,24 @@ static bool ends_with_space(const char *s) {
     return (len > 0 && s[len - 1] == ' ');
 }
 
+static bool is_user_abbreviation_pattern(const char *pattern) {
+    if (pattern == NULL || pattern[0] == '\0') {
+        return false;
+    }
+
+    char stroke[64] = {0};
+    strncpy(stroke, pattern, sizeof(stroke) - 1);
+
+    char *asterisk_pos = strchr(stroke, '*');
+    bool has_asterisk = (asterisk_pos != NULL);
+    if (asterisk_pos != NULL) {
+        *asterisk_pos = '\0';
+    }
+
+    abbreviation_result_t result = mejiro_user_abbreviation(stroke, has_asterisk);
+    return result.success;
+}
+
 static int macro_key_to_index(const char *key) {
     for (uint8_t i = 0; i < MACRO_KEY_COUNT; i++) {
         if (strcmp(key, macro_keys[i]) == 0) {
@@ -194,23 +213,23 @@ static void push_history(const char *output, uint8_t length) {
     history_lengths[HISTORY_SIZE - 1] = length;
 }
 
-// メジロIDのビット順: S,T,K,N,Y,I,A,U,n,t,k,# | S,T,K,N,Y,I,A,U,n,t,k,*
+// メジロIDのビット順: #,S,T,K,N,Y,I,A,U,n,t,k | S,T,K,N,Y,I,A,U,n,t,k,*
 // ビットインデックスへ変換（押されていると1に立てる）
 static uint8_t stn_to_bit(uint16_t kc) {
     switch (kc) {
         // 左手
-        case STN_S1: case STN_S2: return 0;  // S-
-        case STN_TL:              return 1;  // T-
-        case STN_KL:              return 2;  // K-
-        case STN_WL:              return 3;  // N-
-        case STN_PL:              return 4;  // Y-
-        case STN_HL:              return 5;  // I-
-        case STN_RL:              return 6;  // A-
-        case STN_ST1: case STN_ST2: return 7;  // U- (*1,*2)
-        case STN_N3:              return 8;  // n- (#3)
-        case STN_A:               return 9;  // t- (A-)
-        case STN_O:               return 10; // k- (O-)
-        case STN_N1: case STN_N2: return 11; // #
+        case STN_N1: case STN_N2: return 0; // #
+        case STN_S1: case STN_S2: return 1;  // S-
+        case STN_TL:              return 2;  // T-
+        case STN_KL:              return 3;  // K-
+        case STN_WL:              return 4;  // N-
+        case STN_PL:              return 5;  // Y-
+        case STN_HL:              return 6;  // I-
+        case STN_RL:              return 7;  // A-
+        case STN_ST1: case STN_ST2: return 8;  // U- (*1,*2)
+        case STN_N3:              return 9;  // n- (#3)
+        case STN_A:               return 10;  // t- (A-)
+        case STN_O:               return 11; // k- (O-)
         // 右手
         case STN_SR: case STN_TR: return 12; // -S (-T,-S)
         case STN_LR:              return 13; // -T (-L)
@@ -250,7 +269,7 @@ static void convert_and_send(void) {
         }
     }
 
-    static const char *labels_left[12] = {"S","T","K","N","Y","I","A","U","n","t","k","#"};
+    static const char *labels_left[12] = {"#","S","T","K","N","Y","I","A","U","n","t","k"};
     static const char *labels_right[12] = {"S","T","K","N","Y","I","A","U","n","t","k","*"};
 
     char out[64];
@@ -625,8 +644,12 @@ static void convert_and_send(void) {
     // 右手のみ入力も含め、未コマンド入力は一度すべて mejiro_transform に渡す。
     // 変換できなかった場合のみ下の失敗分岐でパススルーする。
 
-    // mejiro_transform: # を含む場合は # を除いたパターンで変換
-    const char *transform_pattern = has_hash && pattern_without_hash[0] != '\0' ? pattern_without_hash : out;
+    // ユーザー略語では # を含めたまま変換し、# による繰り返しを行わない
+    bool is_user_abbr = is_user_abbreviation_pattern(out);
+
+    // mejiro_transform: # を含む場合は # を除いたパターンで変換（ユーザー略語は除外）
+    const char *transform_pattern =
+        (has_hash && !is_user_abbr && pattern_without_hash[0] != '\0') ? pattern_without_hash : out;
     mejiro_result_t transformed = mejiro_transform(transform_pattern);
 
     // 変換成功時は変換結果を出力、失敗時は元のSTN_キーコードをそのまま送信
@@ -636,8 +659,8 @@ static void convert_and_send(void) {
         send_string(final_output);
         append_to_active_macros(final_output);
 
-        // # を含む場合は同じ出力をもう一度送信
-        if (has_hash) {
+        // # を含む場合は同じ出力をもう一度送信（ユーザー略語は除外）
+        if (has_hash && !is_user_abbr) {
             send_string(final_output);
             append_to_active_macros(final_output);
             // 履歴の長さも2倍にする

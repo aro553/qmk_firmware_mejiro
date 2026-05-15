@@ -615,6 +615,14 @@ static void apply_sahen_negative_zu(char *str, int conj_form, const char *suffix
     }
 }
 
+static void apply_kudasari_correction(char *str) {
+    char *pos = str;
+    while ((pos = strstr(pos, "くださり")) != NULL) {
+        memcpy(pos, "ください", 12);
+        pos += 12;
+    }
+}
+
 // メイン動詞活用関数
 verb_result_t mejiro_verb_conjugate(const char *left_conso, const char *left_vowel,
                                     const char *left_particle,
@@ -790,6 +798,9 @@ verb_result_t mejiro_verb_conjugate(const char *left_conso, const char *left_vow
             if (verb != NULL && verb->type == VERB_TYPE_GODAN && (verb->gyou == 'g' || verb->gyou == 'n' || verb->gyou == 'b' || verb->gyou == 'm')) {
                 apply_godan_te_ta_voicing(result.output, strlen(verb->stem));
             }
+        }
+        if (verb != NULL && verb->type == VERB_TYPE_GODAN) {
+            apply_kudasari_correction(result.output);
         }
 
         // 「ある」で「ず」単体になった場合を「あらず」に変換

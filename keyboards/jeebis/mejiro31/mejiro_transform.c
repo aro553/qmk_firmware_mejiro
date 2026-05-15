@@ -964,7 +964,19 @@ mejiro_result_t mejiro_transform(const char *mejiro_id) {
              l_conso, l_vowel, r_conso, r_vowel);
 
     // ユーザー略語チェック（最優先）
-    abbreviation_result_t user_abbr = mejiro_user_abbreviation(full_stroke, has_asterisk);
+    // 先に入力そのもの（# を含む可能性あり）で照合し、未一致時のみ分解後ストロークで照合する。
+    char raw_stroke[128] = {0};
+    strncpy(raw_stroke, mejiro_id, sizeof(raw_stroke) - 1);
+    char *asterisk_pos = strchr(raw_stroke, '*');
+    if (asterisk_pos != NULL) {
+        *asterisk_pos = '\0';
+    }
+    bool raw_has_asterisk = strchr(mejiro_id, '*') != NULL;
+
+    abbreviation_result_t user_abbr = mejiro_user_abbreviation(raw_stroke, raw_has_asterisk);
+    if (!user_abbr.success) {
+        user_abbr = mejiro_user_abbreviation(full_stroke, has_asterisk);
+    }
     if (user_abbr.success) {
         result.kana_length = utf8_char_count(user_abbr.output);
         kana_to_roma(user_abbr.output, result.output, sizeof(result.output));
