@@ -57,21 +57,14 @@ static inline uint16_t jis_transform(uint16_t kc, bool shifted) {
         default: break;
     }
     switch (kc) {
-        case KC_2: return shifted ? JP_AT   : KC_2;   // @ / 2
-        case KC_6: return shifted ? JP_CIRC : KC_6;   // ^ / 6
-        case KC_7: return shifted ? JP_AMPR : KC_7;   // & / 7
-        case KC_8: return shifted ? JP_ASTR : KC_8;   // * / 8
-        case KC_9: return shifted ? JP_LPRN : KC_9;   // ( / 9
-        case KC_0: return shifted ? JP_RPRN : KC_0;   // ) / 0
-
-        case KC_GRV:  return shifted ? JP_TILD : JP_GRV;   // ~ / `
-        case KC_MINS: return shifted ? JP_UNDS : JP_MINS;  // _ / -
-        case KC_EQL:  return shifted ? JP_PLUS : JP_EQL;   // + / =
-        case KC_LBRC: return shifted ? JP_LCBR : JP_LBRC;  // { / [
-        case KC_RBRC: return shifted ? JP_RCBR : JP_RBRC;  // } / ]
-        case KC_BSLS: return shifted ? JP_PIPE : JP_BSLS;  // | / ￥
-        case KC_SCLN: return shifted ? JP_COLN : JP_SCLN;  // : / ;
-        case KC_QUOT: return shifted ? JP_DQUO : JP_QUOT;  // " / '
+        case KC_GRV:  return JP_GRV;  // `
+        case KC_MINS: return JP_MINS; // -
+        case KC_EQL:  return JP_EQL;  // =
+        case KC_LBRC: return JP_LBRC; // [
+        case KC_RBRC: return JP_RBRC; // ]
+        case KC_BSLS: return JP_BSLS; // ￥
+        case KC_SCLN: return JP_SCLN; // ;
+        case KC_QUOT: return JP_QUOT; // '
         default: return kc;
     }
 }
@@ -101,15 +94,13 @@ static inline void tap_code16_unshifted(uint16_t kc) {
 /**
  * JIS変換対象でシフト解除が必要なキーか判定
  * @param kc キーコード
- * @param shifted Shiftキーが押されているかどうか
  * @return シフト解除が必要な場合はtrue
  */
-static inline bool is_jis_shift_target(uint16_t kc, bool shifted) {
-    if (!is_jis_mode || !shifted) return false;
+static inline bool is_jis_shift_target(uint16_t kc) {
     switch (kc) {
         case KC_1: case KC_2: case KC_3: case KC_4: case KC_5:
         case KC_6: case KC_7: case KC_8: case KC_9: case KC_0:
-        case KC_AT: case KC_CIRC: case KC_GRV: case KC_MINS:
+        case KC_AT: case KC_CIRC: case KC_GRV: case KC_MINS: case KC_EQL:
         case KC_LBRC: case KC_RBRC: case KC_BSLS: case KC_SLSH:
         case KC_SCLN: case KC_COLN: case KC_COMM: case KC_DOT:
             return true;
