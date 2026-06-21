@@ -178,6 +178,8 @@ static void replace_nofuu_with_nnafuu(char *text, size_t text_size) {
 // ユーザー略語を検索（完全なストローク）
 abbreviation_result_t mejiro_user_abbreviation(const char *stroke, bool has_asterisk) {
     abbreviation_result_t result = {{0}, false};
+    // 略語はOff
+    return result;
     if (!has_asterisk) {
         return result;
     }
@@ -198,6 +200,8 @@ abbreviation_result_t mejiro_user_abbreviation(const char *stroke, bool has_aste
 // 一般略語を検索（完全なストローク）
 abbreviation_result_t mejiro_abstract_abbreviation(const char *stroke, bool has_asterisk) {
     abbreviation_result_t result = {{0}, false};
+    // 略語はOff
+    return result;
 
     // asteriskなしは完全一致のみ（Python版 abstract_abbreviation_lookup と同等）
     if (!has_asterisk) {
