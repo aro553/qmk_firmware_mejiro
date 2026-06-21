@@ -30,8 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "mejiro_fifo.h"
 
 enum layer_names {
-    _GEMINI = 0,
-    _QWERTY,
+    _QWERTY = 0,
     _QWERTY_SHIFT,
     _NUMBER,
     _NUMBER_SHIFT,
@@ -79,7 +78,6 @@ static alt_layout_def_t alt_jp_layout = ALT_LAYOUT(qwerty);  // 日本語モー�
 // ============================================================
 // 0:未使用, 1:英語, 2:日本語, 3:日英両方
 
-static int stn_lang = 3;  // ステノモード時の言語
 static int kbd_lang = 1;  // キーボードモード時の言語
 
 /*---------------------------------------------------------------------------------------------------*/
@@ -90,7 +88,6 @@ bool is_jis_mode = true;
 bool is_mejiro_mode = true;
 static bool is_mac = false;
 static bool os_detected = false;
-static bool mt_tgl_pressed = false;
 static uint16_t dz_timer = 0;
 static bool dz_delayed = false;
 static uint8_t dz_fifo_len_at_press = 0;  // DZ キー押下時のコンボ FIFO 長
@@ -118,20 +115,6 @@ static inline bool is_modifier_keycode(uint16_t keycode) {
     }
 }
 
-static inline bool mt_tgl_can_toggle(const keyrecord_t *record) {
-    if (combo_fifo_len != 0) return false;
-    if (get_mods() != 0 || get_weak_mods() != 0 || get_oneshot_mods() != 0) return false;
-    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
-        matrix_row_t row_state = matrix_get_row(row);
-        if (row == record->event.key.row) {
-            matrix_row_t mask = ((matrix_row_t)1) << record->event.key.col;
-            row_state &= ~mask;
-        }
-        if (row_state != 0) return false;
-    }
-    return true;
-}
-
 typedef union {
     uint32_t raw;
     struct {
@@ -149,7 +132,6 @@ void eeconfig_init_user(void) {
     user_config.alt_mode = true;
     user_config.mejiro_mode = true;
     eeconfig_update_user(user_config.raw);
-    steno_set_mode(STENO_MODE_GEMINI);
 }
 
 void keyboard_post_init_user(void) {
@@ -316,18 +298,14 @@ static void refresh_force_qwerty_state(void) {
     layer_state_t qwerty_default = (layer_state_t)1UL << _QWERTY;
 
     if (should_force) {
-        if (current_layer == _GEMINI) {
-            mejiro_reset_state();
-        }
         if (!force_qwerty_active || default_layer_state != qwerty_default) {
             default_layer_set(qwerty_default);
             layer_move(_QWERTY);
         }
         force_qwerty_active = true;
     } else if (force_qwerty_active) {
-        layer_state_t target_default = (layer_state_t)1UL << (default_layer == 1 ? _QWERTY : _GEMINI);
-        default_layer_set(target_default);
-        layer_move(default_layer == 1 ? _QWERTY : _GEMINI);
+        default_layer_set(qwerty_default);
+        layer_move(_QWERTY);
         force_qwerty_active = false;
     }
 }
@@ -340,11 +318,9 @@ static void refresh_shift_layer_state(void) {
     if (number_shift_shortcut) {
       layer_move(_NUMBER_SHIFT);
     } else if (shift_held) {
-        if (!mt_tgl_pressed) {
-            layer_move(_QWERTY_SHIFT);
-            default_layer_set((layer_state_t)1UL << _QWERTY);
-            default_layer = _QWERTY;
-        }
+        layer_move(_QWERTY_SHIFT);
+        default_layer_set((layer_state_t)1UL << _QWERTY);
+        default_layer = _QWERTY;
     } else {
         if (active_layer == _QWERTY_SHIFT) {
             layer_move(_QWERTY);
@@ -365,7 +341,7 @@ static bool has_alt_layout_for_lang(uint8_t lang) {
 }
 
 static uint8_t get_active_lang(void) {
-    return (default_layer == _QWERTY) ? (uint8_t)kbd_lang : (uint8_t)stn_lang;
+    return (uint8_t)kbd_lang;
 }
 
 static void apply_alt_mode_for_lang(uint8_t lang) {
@@ -568,24 +544,6 @@ bool is_combo_candidate(uint16_t keycode) {
 /*---------------------------------------------------------------------------------------------------*/
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
-    // GEMINI
-    // ┌─────┬─────┬─────┬─────┬─────┬─────┐             ┌─────┬─────┬─────┬─────┬─────┬─────┐
-    // │  #  │  S  │  T  │  P  │  H  │  *  │             │  *  │  F  │  P  │  L  │  T  │  D  │
-    // ├─────┼─────┼─────┼─────┼─────┼─────┤             ├─────┼─────┼─────┼─────┼─────┼─────┤
-    // │  #  │  S  │  K  │  W  │  R  │  *  │             │  *  │  R  │  B  │  G  │  S  │  Z  │
-    // └─────┴─────┴─────┴─────┴─────┴─────┘             └─────┴─────┴─────┴─────┴─────┴─────┘
-    //                         ┌───────────┐             ┌───────────┐
-    //                         │     #     │             │     #     │
-    //                         ├─────┬─────┤   ┌─────┐   ├─────┬─────┤
-    //                         │  A  │  O  │   │Layer│   │  E  │  U  │
-    //                         └─────┴─────┘   └─────┘   └─────┴─────┘
-    // GEMINI
-    [_GEMINI] = LAYOUT(
-        STN_N1, STN_S1, STN_TL, STN_PL, STN_HL, STN_ST1,         STN_ST3, STN_FR, STN_PR, STN_LR, STN_TR, STN_DR,
-        STN_N2, STN_S2, STN_KL, STN_WL, STN_RL, STN_ST2,         STN_ST4, STN_RR, STN_BR, STN_GR, STN_SR, STN_ZR,
-                                        STN_N3,          MT_TGL, STN_N4,
-                                        STN_A,  STN_O,           STN_E,   STN_U
-    ),
     // QWERTY
     // ┌─────┬─────┬─────┬─────┬─────┬─────┐             ┌─────┬─────┬─────┬─────┬─────┬─────┐
     // │  `  │  q  │  w  │  e  │  r ESC t  │             │  y DEL u  │  i  │  o  │  p  │  -  │
@@ -692,18 +650,6 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         }
     }
 
-    if (is_mejiro_mode && get_highest_layer(layer_state | default_layer_state) == _GEMINI && is_stn_key(keycode)) {
-        if (record->event.pressed) {
-            mejiro_on_press(keycode);
-        } else {
-            mejiro_on_release(keycode);
-            if (mejiro_should_send_passthrough()) {
-                mejiro_send_passthrough_keys();
-            }
-        }
-        return false;
-    }
-
     if (is_combo_candidate(keycode)) {
         if (keycode == KC_GRV) {
             if (is_jis_mode && (mods & MOD_MASK_ALT)) {
@@ -772,24 +718,8 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 
     switch (keycode) {
         case MT_TGL:
-            if (record->event.pressed) {
-                mt_tgl_pressed = true;
-                if (record->tap.count > 0 && mt_tgl_can_toggle(record)) {
-                    if (default_layer == _QWERTY) {
-                        default_layer_set((layer_state_t)1UL << _GEMINI);
-                        layer_move(_GEMINI);
-                        default_layer = _GEMINI;
-                        update_lang(is_mejiro_mode ? 2 : stn_lang);
-                    } else {
-                        mejiro_reset_state();
-                        default_layer_set((layer_state_t)1UL << _QWERTY);
-                        layer_move(_QWERTY);
-                        default_layer = _QWERTY;
-                        update_lang(kbd_lang);
-                    }
-                }
-            } else {
-                mt_tgl_pressed = false;
+            if (record->event.pressed && record->tap.count > 0) {
+                tap_code16(KC_TILD);
             }
             return record->tap.count == 0;
         case TG_JIS:
