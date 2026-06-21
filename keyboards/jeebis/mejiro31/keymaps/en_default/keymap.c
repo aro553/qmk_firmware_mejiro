@@ -424,7 +424,7 @@ static inline transformed_key_t transform_key_extended(uint16_t kc, bool shifted
     uint16_t sbl_kc = sbl_transform(kc, shifted, layer);
     uint16_t alt_kc = alt_transform(sbl_kc, shifted, layer);
 
-    bool needs_unshift = is_jis_shift_target(alt_kc, shifted);
+    bool needs_unshift = is_jis_shift_target(alt_kc);
 
     if (!needs_unshift && shifted && is_sbl_mode && !force_qwerty_active) {
         if (layer == _NUMBER || layer == _QWERTY) {
